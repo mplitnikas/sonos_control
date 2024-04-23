@@ -1,0 +1,161 @@
+esphome:
+  name: sonos-control
+  platform: ESP8266
+  board: d1_mini
+  includes:
+    - tinyxml2.h
+    - tinyxml2.cpp
+
+globals:
+  - id: my_xml_parser
+    type: std::function<float(const std::string&)>
+    initial_value: |-
+      [](const std::string& xml_str) -> float {
+        tinyxml2::XMLDocument doc;
+        doc.Parse(xml_str.c_str());
+        if (doc.Error()) {
+          ESP_LOGE("custom", "XML parsing error: %s", doc.ErrorStr());
+            return 0.0f;
+        }
+        auto root = doc.FirstChildElement("data");
+        if (root == nullptr) {
+          ESP_LOGE("custom", "XML root element not found");
+          return 0.0f;
+        }
+        auto item = root->FirstChildElement("item");
+        if (item == nullptr) {
+          ESP_LOGE("custom", "XML item element not found");
+          return 0.0f;
+        }
+        auto value_element = item->FirstChildElement("key");
+        if (value_element == nullptr) {
+          ESP_LOGE("custom", "XML value element not found");
+          return 0.0f;
+        }
+        const char* value_str = value_element->GetText();
+        return atof(value_str);
+        }
+
+
+substitutions:
+  sonos_ip: "192.168.0.100"
+
+# Enable logging
+logger:
+
+ota:
+  password: ""
+
+wifi:
+  ssid: "Stone Cold Steve Autism"
+  password: "wedonthaveinternet"
+  fast_connect: true
+  manual_ip:
+    static_ip: 192.168.0.134
+    gateway: 192.168.0.1
+    subnet: 255.255.255.0
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: D3
+      mode: INPUT_PULLUP
+    name: "play/pause button"
+    id: play_button
+    on_press:
+      then:
+        - logger.log: "play button pressed!"
+
+  - platform: template
+    name: "Sonos Play/Pause State"
+    id: sonos_play_pause_state
+    on_state:
+      then:
+        - binary_sensor.template.publish:
+            id: play_button
+            state: !lambda 'return id(sonos_play_pause_state).state;'
+
+sensor:
+  - platform: rotary_encoder
+    publish_initial_value: true
+    name: "Volume Encoder"
+    id: volume_encoder
+    resolution: 1
+    min_value: 0
+    max_value: 99
+    filters:
+      - or:
+        - debounce: 0.1s
+        - delta: 10
+    pin_a:
+      number: D2
+      mode:
+        input: true
+        pullup: true
+    pin_b:
+      number: D1
+      mode:
+        input: true
+        pullup: true
+    on_value:
+      then:
+        - logger.log:
+            format: "Rotary encoder value: %f"
+            args: [ 'id(volume_encoder).state' ]
+
+  - platform: template
+    name: "Sonos Volume"
+    id: sonos_volume_state
+
+http_request:
+
+  # - resource: sonos_volume_request
+  #   url: "http://${sonos_ip}:1400/MediaRenderer/RenderingControl/Control"
+  #   method: POST
+  #   headers:
+  #     Content-Type: application/soap+xml
+  #   body: >
+  #     <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  #       <soap:Body>
+  #         <u:GetVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">
+  #           <InstanceID>0</InstanceID>
+  #           <Channel>Master</Channel>
+  #         </u:GetVolume>
+  #       </soap:Body>
+  #     </soap:Envelope>
+  #   response:
+  #     type: xml
+  #     xpath: './/CurrentVolume'
+  #     return_type: int
+  #
+  # - resource: sonos_state_request
+  #   url: "http://${sonos_ip}:1400/MediaRenderer/AVTransport/Control"
+  #   method: POST
+  #   headers:
+  #     Content-Type: application/soap+xml
+  #   body: >
+  #     <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  #       <soap:Body>
+  #         <u:GetTransportInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+  #           <InstanceID>0</InstanceID>
+  #         </u:GetTransportInfo>
+  #       </soap:Body>
+  #     </soap:Envelope>
+  #   response:
+  #     type: xml
+  #     xpath: './/CurrentTransportState'
+  #     return_type: string
+
+# interval:
+#   interval: 5s
+#   then:
+#     lambda: |-
+#       auto sonos_state = id(sonos_state_request).get_state();
+#       if (sonos_state.has_value()) {
+#         id(sonos_play_pause_state).value = sonos_state.value() == "PLAYING";
+#       }
+#       auto sonos_volume = id(sonos_volume_request).get_volume();
+#       if (sonos_volume.has_value()) {
+#         id(sonos_volume_state).value = sonos_volume.value();
+#       }
+#
